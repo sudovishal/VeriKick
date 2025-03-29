@@ -1,13 +1,15 @@
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 import asyncio
+import os
 from flask import Flask
 from threading import Thread
+
 app = Flask(__name__)
 
-TOKEN = "MTM1NDcxOTE5MDAxOTM0MjQzNw.GmjVvR.JMcUr2GWqriwB02MpEgbMZ6gpySJJfYKLMfWvE"
-GUILD_ID = 762588559072034837  # Replace with your server ID
-MEMBERS_ROLE_ID = 1027036183903080509  # Replace with the 'Members' role ID
+TOKEN = os.getenv('TOKEN')  # Use environment variable
+GUILD_ID = int(os.getenv('GUILD_ID', '762588559072034837'))  # Convert to int
+MEMBERS_ROLE_ID = int(os.getenv('MEMBERS_ROLE_ID', '1027036183903080509'))  # Convert to int
 
 intents = discord.Intents.default()
 intents.members = True  # Required to track new members
@@ -17,8 +19,12 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    await bot.tree.sync()  # Syncs all slash commands
-    print("Slash commands synced!")  # Debugging line
+    try:
+        await bot.tree.sync()  # Syncs all slash commands
+        print("Slash commands synced!")  # Debugging line
+    except Exception as e:
+        print(f"Error syncing slash commands: {e}")
+    
     print(f'Logged in as {bot.user}')
 
 
@@ -29,14 +35,17 @@ async def on_member_join(member):
 
     await asyncio.sleep(1800)  # Wait for 30 minutes (1800 seconds)
 
-    guild = bot.get_guild(GUILD_ID)
-    member = guild.get_member(member.id)  # Fetch latest member info
-
-    if member and MEMBERS_ROLE_ID not in [role.id for role in member.roles]:
-        await member.kick(reason="Not verified within 30 minutes")
-        print(f"{member.name} was kicked for not verifying.")
-
-
+    try:
+        guild = bot.get_guild(GUILD_ID)
+        member = await guild.fetch_member(member.id)  # Use fetch_member instead of get_member
+        
+        if member and MEMBERS_ROLE_ID not in [role.id for role in member.roles]:
+            await member.kick(reason="Not verified within 30 minutes")
+            print(f"{member.name} was kicked for not verifying.")
+    except discord.NotFound:
+        print(f"Member {member.id} not found after waiting period.")
+    except Exception as e:
+        print(f"Error during verification check: {e}")
 
 
 @app.route('/')
@@ -48,7 +57,8 @@ def run():
     app.run(host='0.0.0.0', port=8080)
 
 
-Thread(target=run).start()
+def run_bot():
+    bot.run(TOKEN)
 
 
 @bot.command()
@@ -77,4 +87,10 @@ async def keek_error(ctx, error):
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send("Usage: `!keek @user [reason]`")
 
-bot.run(TOKEN)
+
+if __name__ == "__main__":
+    flask_thread = Thread(target=run)
+    flask_thread.daemon = True  # Set thread as daemon so it exits when main thread exits
+    flask_thread.start()
+    
+    run_bot()  # Run the bot in the main thread

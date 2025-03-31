@@ -118,7 +118,7 @@ def health_check():
     return 'Bot is online!', 200
 
 def ping_self():
-    app_url = "http://localhost:8080/health"
+    app_url = os.getenv('APP_URL')
 
     while True:
         try:
@@ -128,7 +128,7 @@ def ping_self():
             print(f"Self-ping failed: {e}")
             
         # Sleep for 10 minutes before pinging again
-        time.sleep(1800)
+        time.sleep(1200)
 
 # Start the self-pinging in a background thread
 def start_ping_thread():

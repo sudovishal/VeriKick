@@ -4,6 +4,9 @@ import asyncio
 import os
 from flask import Flask
 from threading import Thread
+import threading
+import time
+import requests
 from datetime import datetime, timedelta
 import pytz
 IST = pytz.timezone('Asia/Kolkata')
@@ -109,6 +112,32 @@ async def on_member_join(member):
     else:
         await log_channel.send(f"ℹ️ Member **{member.display_name}** joined but does not have the role **{role.name}**. No action needed.")
 
+
+@app.route('/health')
+def health_check():
+    return 'Bot is online!', 200
+
+def ping_self():
+    app_url = "http://localhost:8080/health"
+
+    while True:
+        try:
+            response = requests.get(app_url)
+            print(f"Self-ping: {response.status_code}")
+        except Exception as e:
+            print(f"Self-ping failed: {e}")
+            
+        # Sleep for 10 minutes before pinging again
+        time.sleep(1800)
+
+# Start the self-pinging in a background thread
+def start_ping_thread():
+    ping_thread = threading.Thread(target=ping_self, daemon=True)
+    ping_thread.start()
+    print("Self-ping mechanism started")
+
+
+start_ping_thread()
 
 @app.route('/')
 def home():

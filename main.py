@@ -60,7 +60,7 @@ async def kick_if_no_members_role(member):
     if log_channel:
         await log_channel.send("Timer started for verification.")
 
-    await asyncio.sleep(120)  # Wait for an hour
+    await asyncio.sleep(3600)  # Wait for an hour
 
     try:
         guild = bot.get_guild(guild_id)

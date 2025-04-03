@@ -33,7 +33,8 @@ async def on_ready():
         print(f"Error syncing slash commands: {e}")
     
     print(f'Logged in as {bot.user}')
-
+     # Check for unverified users after bot restart
+    await check_unverified_users()
 
 @bot.event
 async def on_member_join(member):
@@ -210,7 +211,7 @@ async def check_unverified_users():
                         if log_channel:
                             time_diff = current_time - join_time
                             hours = int(time_diff.total_seconds() // 3600)
-                            await log_channel.send(f"⏰ {member.mention} was kicked for not verifying. They joined {hours}+ hours ago.")
+                            await log_channel.send(f"⏰ {member.name} was kicked for not verifying. They joined {hours}+ hours ago.")
                     except discord.Forbidden:
                         print(f"Bot doesn't have permission to kick {member.id}")
                         if log_channel:
@@ -306,6 +307,15 @@ async def test_log(ctx):
         await ctx.send("Message sent to log channel successfully.")
     else:
         await ctx.send(f"❌ Could not find log channel with ID {LOG_CHANNEL_ID}.")
+
+
+@bot.command()
+@commands.has_permissions(kick_members=True)
+async def check_unverified(ctx):
+    """Manually check for and kick unverified users"""
+    await ctx.send("Starting check for unverified users...")
+    await check_unverified_users()
+    await ctx.send("Check completed. See logs for details.")
 
 if __name__ == "__main__":
     flask_thread = Thread(target=run)

@@ -6,23 +6,71 @@ from flask import Flask
 from threading import Thread
 import threading
 import time
+import logging
 import requests
 from datetime import datetime, timedelta
 import pytz
+import re
+from dotenv import load_dotenv
+from urllib.parse import urlparse
+
 IST = pytz.timezone('Asia/Kolkata')
 
 app = Flask(__name__)
+
+# Load environment variables from .env file
+load_dotenv()
 
 TOKEN = os.getenv('TOKEN')  # Use environment variable
 GUILD_ID = int(os.getenv('GUILD_ID', '762588559072034837'))  # Convert to int
 MEMBERS_ROLE_ID = int(os.getenv('MEMBERS_ROLE_ID', '1027036183903080509'))  # Convert to int
 NEWCOMMER_ROLE_ID = int(os.getenv('NEWCOMMER_ROLE_ID', '1355549916713193472'))  # Convert to int
 LOG_CHANNEL_ID = int(os.getenv('LOG_CHANNEL_ID', '960241934230749265'))  # Convert to int
+
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 intents = discord.Intents.default()
 intents.members = True  # Required to track new members
 intents.message_content = True  # Required to read message content
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# Regular expression for URLs (for video embedder)
+URL_REGEX = r'(https?://[^\s]+)'
+
+# Supported video domains and platform names with subdomains
+VIDEO_INFO = {
+    'youtube.com': 'YouTube',
+    'www.youtube.com': 'YouTube',
+    'youtu.be': 'YouTube',
+    'instagram.com': 'Instagram',
+    'www.instagram.com': 'Instagram',
+    'tiktok.com': 'TikTok',
+    'www.tiktok.com': 'TikTok',
+    'twitter.com': 'Twitter',
+    'www.twitter.com': 'Twitter',
+    'x.com': 'Twitter',
+    'www.x.com': 'Twitter',
+    'reddit.com': 'Reddit',
+    'www.reddit.com': 'Reddit'
+}
+
+# Function to modify social media URLs for embedding
+def modify_social_url(url):
+    domain = urlparse(url).netloc.lower()
+    parsed_url = urlparse(url)
+    query_params = parsed_url.query  # Check for any query parameters
+
+    if 'instagram.com' in domain:
+        return url.replace('instagram.com', 'ddinstagram.com').replace('www.instagram.com', 'ddinstagram.com')
+    elif 'tiktok.com' in domain:
+        return url.replace('tiktok.com', 'ddtiktok.com').replace('www.tiktok.com', 'ddtiktok.com')
+    elif 'twitter.com' in domain or 'x.com' in domain:
+        return url.replace('twitter.com', 'fxtwitter.com').replace('www.twitter.com', 'fxtwitter.com').replace('x.com', 'fxtwitter.com').replace('www.x.com', 'fxtwitter.com')
+    elif 'reddit.com' in domain:  # Skip modification if query params exist (likely external embed)
+        return url.replace('reddit.com', 'vxreddit.com').replace('www.reddit.com', 'vxreddit.com')
+    return url
 
 @bot.event
 async def on_ready():
@@ -33,25 +81,25 @@ async def on_ready():
         print(f"Error syncing slash commands: {e}")
     
     print(f'Logged in as {bot.user}')
-     # Check for unverified users after bot restart
+    logger.info(f'{bot.user} is online!')
+    await bot.change_presence(activity=discord.Game(name="Share a video link!"))
+    
+    # Check for unverified users after bot restart
     await check_unverified_users()
 
 @bot.event
 async def on_member_join(member):
-    # print(await has_members_role(member))
-    # print(await has_new_commer_role(member))
     if await has_members_role(member) and await has_new_commer_role(member):
         await remove_newcomer_role_for_rejoins(member)
     else:
         await kick_if_no_members_role(member)
 
-    
 async def kick_if_no_members_role(member):
     """When a new member joins, start a timer for verification."""
     member_id = member.id
     guild_id = member.guild.id
    
-     # Get the log channel
+    # Get the log channel
     log_channel = member.guild.get_channel(LOG_CHANNEL_ID)
     if not log_channel:
         print(f"Warning: Log channel with ID {LOG_CHANNEL_ID} not found.")
@@ -91,7 +139,6 @@ async def kick_if_no_members_role(member):
         print(f"Member {member_id} not found after waiting period.")
     except Exception as e:
         print(f"Error during verification check: {e}")
-
 
 async def remove_newcomer_role_for_rejoins(member):
     """Event triggered when a member joins the server"""
@@ -148,16 +195,13 @@ async def remove_newcomer_role_for_rejoins(member):
     else:
         await log_channel.send(f"ℹ️ Member **{member.display_name}** joined but does not have the role **{role.name}**. No action needed.")
 
-
 async def has_members_role(member):
     members_role = await member.guild.fetch_role(MEMBERS_ROLE_ID)
-    # print(member.roles)
     return members_role is not None and members_role in member.roles
 
 async def has_new_commer_role(member):
     newcommer_role = await member.guild.fetch_role(NEWCOMMER_ROLE_ID)
     return newcommer_role is not None and newcommer_role in member.roles
-
 
 async def check_unverified_users():
     """Check for any unverified users after bot restart"""
@@ -231,6 +275,55 @@ async def check_unverified_users():
         if log_channel:
             await log_channel.send(f"❌ Error during unverified user check: {str(e)}")
 
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    # Process commands if any (e.g., !keek, !test_log, !check_unverified)
+    await bot.process_commands(message)
+
+    # Video embedder logic
+    urls = re.findall(URL_REGEX, message.content)
+    if not urls:
+        return
+
+    url = urls[0]
+    domain = urlparse(url).netloc.lower()
+
+    # Check if the URL is from a supported video domain
+    if any(video_domain in domain for video_domain in VIDEO_INFO.keys()):
+        logger.info(f"Processing video URL: {url}")
+        try:
+            # Check if bot has Manage Messages permission
+            if message.channel.permissions_for(message.guild.me).manage_messages:
+                await message.delete()
+                logger.info("Original message deleted")
+            else:
+                logger.warning("Bot lacks Manage Messages permission, skipping message deletion")
+
+            # Modify URL for supported platforms
+            modified_url = modify_social_url(url)
+
+            # Get platform name based on the original domain
+            platform_name = VIDEO_INFO.get(domain, "Unknown Platform")
+
+            # Cool text message above video
+            cool_message = (
+                f" **{message.author.mention} Dropped a video....!** \n"
+                f"🌐 [original Link!]({modified_url})\n"
+                f"ℹ️ **Platform:** {platform_name}\n"
+            )
+            await message.channel.send(cool_message)
+
+        except discord.Forbidden as e:
+            logger.error(f"Permission error: {e}")
+            await message.channel.send("⚠️ Bot lacks permissions to delete message!")
+        except Exception as e:
+            logger.error(f"Unexpected error processing {url}: {e}")
+            await message.channel.send("❌ Oops! Something went wrong!")
+    else:
+        logger.info(f"Ignoring non-video URL: {url}")
 
 @app.route('/health')
 def health_check():
@@ -255,21 +348,17 @@ def start_ping_thread():
     ping_thread.start()
     print("Self-ping mechanism started")
 
-
 start_ping_thread()
 
 @app.route('/')
 def home():
     return "Bot is running!"
 
-
 def run():
     app.run(host='0.0.0.0', port=8080)
 
-
 def run_bot():
     bot.run(TOKEN)
-
 
 @bot.command()
 @commands.has_permissions(kick_members=True)  # Restrict command to mods/admins
@@ -288,7 +377,6 @@ async def keek(ctx, member: discord.Member, *, reason="No reason provided"):
     except discord.HTTPException:
         await ctx.send("❌ An error occurred while trying to kick the user.")
 
-
 # ✅ Error Handling for !keek Command
 @keek.error
 async def keek_error(ctx, error):
@@ -296,7 +384,6 @@ async def keek_error(ctx, error):
         await ctx.send("❌ You don't have permission to use this command.")
     elif isinstance(error, commands.MissingRequiredArgument):
         await ctx.send("Usage: `!keek @user [reason]`")
-
 
 @bot.command()
 async def test_log(ctx):
@@ -307,7 +394,6 @@ async def test_log(ctx):
         await ctx.send("Message sent to log channel successfully.")
     else:
         await ctx.send(f"❌ Could not find log channel with ID {LOG_CHANNEL_ID}.")
-
 
 @bot.command()
 @commands.has_permissions(kick_members=True)
